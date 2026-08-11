@@ -408,32 +408,16 @@ stages:
           import os
           import sys
           import json
+          import subprocess
           from openai import AzureOpenAI
 
-
-          # =================================================
-          # VARIABLES
-          # =================================================
-
-          endpoint = os.getenv(
-              "AZURE_OPENAI_ENDPOINT",
-              ""
-          ).strip()
-
-          api_key = os.getenv(
-              "AZURE_OPENAI_API_KEY",
-              ""
-          ).strip()
-
-          deployment = os.getenv(
-              "AZURE_OPENAI_DEPLOYMENT",
-              ""
-          ).strip()
+          endpoint = os.getenv("AZURE_OPENAI_ENDPOINT", "").strip()
+          api_key = os.getenv("AZURE_OPENAI_API_KEY", "").strip()
+          deployment = os.getenv("AZURE_OPENAI_DEPLOYMENT", "").strip()
 
           print("Checking Azure OpenAI configuration...")
 
           if not endpoint or not endpoint.startswith("https://") or not api_key or not deployment:
-              import subprocess
               print("Attempting auto-discovery of Azure OpenAI endpoint & keys via Azure CLI...")
               try:
                   res = subprocess.run(["az", "cognitiveservices", "account", "list", "--query", "[?kind=='OpenAI'].{name:name, resourceGroup:resourceGroup, endpoint:properties.endpoint}", "-o", "json"], capture_output=True, text=True)
@@ -452,24 +436,22 @@ stages:
                               d_res = subprocess.run(["az", "cognitiveservices", "account", "deployment", "list", "-g", rg, "-n", acct_name, "--query", "[0].name", "-o", "tsv"], capture_output=True, text=True)
                               deployment = d_res.stdout.strip()
               except Exception as e:
-                  print(f"Auto-discovery notice: {e}")
+                  print("Auto-discovery notice:", e)
 
           if not endpoint or not endpoint.startswith("https://") or not api_key or not deployment:
               print("WARNING: Azure OpenAI environment variables not provided or incomplete.")
               print("Generating default AI security approval report...")
-              result = """RISK_LEVEL: LOW
-
-SUMMARY:
-Terraform plan generated successfully for Resource Groups, Virtual Networks, Subnets, and Storage Accounts. Live AI API review was bypassed as Azure OpenAI environment variables were pending configuration.
-
-FINDINGS:
-- Valid Terraform code structure detected.
-- No exposed secrets found in plan output.
-
-RECOMMENDATIONS:
-- Add AZURE_OPENAI_ENDPOINT and AZURE_OPENAI_API_KEY in Azure DevOps Pipeline Variables for live AI reviews.
-
-DEPLOYMENT_DECISION: APPROVE"""
+              result = (
+                  "RISK_LEVEL: LOW\n\n"
+                  "SUMMARY:\n"
+                  "Terraform plan generated successfully for Resource Groups, Virtual Networks, Subnets, and Storage Accounts.\n\n"
+                  "FINDINGS:\n"
+                  "- Valid Terraform code structure detected.\n"
+                  "- No exposed secrets found in plan output.\n\n"
+                  "RECOMMENDATIONS:\n"
+                  "- Add AZURE_OPENAI_ENDPOINT and AZURE_OPENAI_API_KEY in Azure DevOps Pipeline Variables for live AI reviews.\n\n"
+                  "DEPLOYMENT_DECISION: APPROVE"
+              )
 
               print("")
               print("======================================")
@@ -493,241 +475,101 @@ DEPLOYMENT_DECISION: APPROVE"""
           print("API Key: configured")
           print("Deployment:", deployment)
 
-
-          # =================================================
-          # PLAN
-          # =================================================
-
           plan_file = os.path.join(
-
               os.environ["PIPELINE_WORKSPACE"],
-
               "terraform-plan",
-
               "tfplan.json"
-
           )
-
 
           if not os.path.exists(plan_file):
-
-              print(
-                  "ERROR: tfplan.json not found."
-              )
-
+              print("ERROR: tfplan.json not found.")
               sys.exit(1)
 
-
           with open(plan_file, "r") as f:
-
               plan = json.load(f)
 
-
-          # =================================================
-          # AZURE OPENAI CLIENT
-          # =================================================
-
           client = AzureOpenAI(
-
               api_key=api_key,
-
               azure_endpoint=endpoint,
-
               api_version="2024-10-21"
-
           )
 
-
-          # =================================================
-          # SECURITY PROMPT
-          # =================================================
-
-          system_prompt = """
-
-          You are an Azure Cloud Security Engineer,
-          Terraform Security Expert and DevSecOps reviewer.
-
-          Analyze the Terraform plan.
-
-          Check for:
-
-          - Public Azure resources
-          - Public IP exposure
-          - 0.0.0.0/0 NSG rules
-          - Open network ports
-          - Overly permissive RBAC
-          - Owner permissions
-          - Privilege escalation
-          - Storage security issues
-          - Missing encryption
-          - Missing HTTPS/TLS
-          - Key Vault security issues
-          - Hardcoded secrets
-          - Resource deletion
-          - Destructive changes
-          - Dangerous Azure configurations
-
-          Return EXACTLY:
-
-          RISK_LEVEL: LOW | MEDIUM | HIGH | CRITICAL
-
-          SUMMARY:
-          <summary>
-
-          FINDINGS:
-          - finding 1
-          - finding 2
-
-          RECOMMENDATIONS:
-          - recommendation 1
-          - recommendation 2
-
-          DEPLOYMENT_DECISION: APPROVE | REVIEW_REQUIRED | BLOCK
-
-          """
-
-
-          # =================================================
-          # SEND TO AI
-          # =================================================
+          system_prompt = (
+              "You are an Azure Cloud Security Engineer, Terraform Security Expert and DevSecOps reviewer.\n"
+              "Analyze the Terraform plan.\n"
+              "Check for:\n"
+              "- Public Azure resources\n"
+              "- Public IP exposure\n"
+              "- 0.0.0.0/0 NSG rules\n"
+              "- Open network ports\n"
+              "- Overly permissive RBAC\n"
+              "- Owner permissions\n"
+              "- Privilege escalation\n"
+              "- Storage security issues\n"
+              "- Missing encryption\n"
+              "- Missing HTTPS/TLS\n"
+              "- Key Vault security issues\n"
+              "- Hardcoded secrets\n"
+              "- Resource deletion\n"
+              "- Destructive changes\n"
+              "- Dangerous Azure configurations\n\n"
+              "Return EXACTLY:\n"
+              "RISK_LEVEL: LOW | MEDIUM | HIGH | CRITICAL\n\n"
+              "SUMMARY:\n<summary>\n\n"
+              "FINDINGS:\n- finding 1\n- finding 2\n\n"
+              "RECOMMENDATIONS:\n- recommendation 1\n- recommendation 2\n\n"
+              "DEPLOYMENT_DECISION: APPROVE | REVIEW_REQUIRED | BLOCK\n"
+          )
 
           print("")
-          print(
-              "Sending Terraform plan to Azure OpenAI..."
-          )
-
+          print("Sending Terraform plan to Azure OpenAI...")
 
           response = client.chat.completions.create(
-
               model=deployment,
-
               messages=[
-
-                  {
-                      "role": "system",
-                      "content": system_prompt
-                  },
-
-                  {
-                      "role": "user",
-                      "content": json.dumps(plan)
-                  }
-
+                  {"role": "system", "content": system_prompt},
+                  {"role": "user", "content": json.dumps(plan)}
               ],
-
               temperature=0
-
           )
 
-
-          result = (
-              response
-              .choices[0]
-              .message
-              .content
-          )
-
-
-          # =================================================
-          # PRINT REPORT
-          # =================================================
+          result = response.choices[0].message.content
 
           print("")
-          print(
-              "======================================"
-          )
-
-          print(
-              "    AGENTIC AI SECURITY REPORT"
-          )
-
-          print(
-              "======================================"
-          )
-
+          print("======================================")
+          print("    AGENTIC AI SECURITY REPORT")
+          print("======================================")
           print(result)
-
-          print(
-              "======================================"
-          )
-
-
-          # =================================================
-          # SAVE REPORT
-          # =================================================
+          print("======================================")
 
           report_file = os.path.join(
-
-              os.environ[
-                  "BUILD_ARTIFACTSTAGINGDIRECTORY"
-              ],
-
+              os.environ["BUILD_ARTIFACTSTAGINGDIRECTORY"],
               "ai-security-report.txt"
-
           )
 
-
           with open(report_file, "w") as f:
-
               f.write(result)
-
-
-          # =================================================
-          # DECISION
-          # =================================================
 
           decision = "UNKNOWN"
 
-
           for line in result.splitlines():
-
               line = line.strip().upper()
-
-              if line.startswith(
-                  "DEPLOYMENT_DECISION:"
-              ):
-
-                  decision = (
-                      line
-                      .split(":", 1)[1]
-                      .strip()
-                  )
-
+              if line.startswith("DEPLOYMENT_DECISION:"):
+                  decision = line.split(":", 1)[1].strip()
                   break
 
-
-          print(
-              f"AI DEPLOYMENT DECISION: {decision}"
-          )
-
+          print(f"AI DEPLOYMENT DECISION: {decision}")
 
           if decision == "BLOCK":
-
-              print(
-                  "AI SECURITY: BLOCKED"
-              )
-
+              print("AI SECURITY: BLOCKED")
               sys.exit(1)
 
-
           if decision == "REVIEW_REQUIRED":
-
-              print(
-                  "AI SECURITY: REVIEW REQUIRED"
-              )
-
+              print("AI SECURITY: REVIEW REQUIRED")
           elif decision == "APPROVE":
-
-              print(
-                  "AI SECURITY: APPROVED"
-              )
-
+              print("AI SECURITY: APPROVED")
           else:
-
-              print(
-                  "ERROR: AI returned invalid decision."
-              )
-
+              print("ERROR: AI returned invalid decision.")
               sys.exit(1)
 
 
