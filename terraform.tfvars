@@ -8,6 +8,11 @@ resource_groups = {
       ManagedBy   = "Terraform"
     }
   }
+  rg2 = {
+    name     = "rg-demo-dev-02"
+    location = "eastus"
+
+  }
 }
 
 # Virtual Networks Configuration
