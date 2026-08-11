@@ -190,7 +190,6 @@ stages:
           --soft-fail
 
       displayName: 'Run Checkov'
-      continueOnError: true
 
 
 # ==========================================================
@@ -225,7 +224,6 @@ stages:
         tfsec "$(terraformWorkingDirectory)" --soft-fail
 
       displayName: 'Run tfsec'
-      continueOnError: true
 
 
 # ==========================================================
