@@ -108,6 +108,8 @@ stages:
 
         backendAzureRmKey: '$(backendKey)'
 
+        backendAzureRmUseEntraIdForStorage: false
+
     - task: TerraformTask@5
       displayName: 'Terraform Validate'
 
@@ -309,6 +311,8 @@ stages:
         backendAzureRmContainerName: '$(backendContainer)'
 
         backendAzureRmKey: '$(backendKey)'
+
+        backendAzureRmUseEntraIdForStorage: false
 
     - task: TerraformTask@5
       displayName: 'Terraform Plan'
@@ -819,6 +823,8 @@ stages:
         backendAzureRmContainerName: '$(backendContainer)'
 
         backendAzureRmKey: '$(backendKey)'
+
+        backendAzureRmUseEntraIdForStorage: false
 
 
     - task: TerraformTask@5
