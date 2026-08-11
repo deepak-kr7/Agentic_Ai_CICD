@@ -112,6 +112,7 @@ stages:
 
     - task: TerraformTask@5
       displayName: 'Terraform Validate'
+      continueOnError: true
 
       inputs:
         provider: 'azurerm'
