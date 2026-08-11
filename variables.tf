@@ -44,7 +44,7 @@ variable "storage_accounts" {
 #API key from Azure Open AI
 variable "ai" {
   default = "B7iEUe5TCSRayYqbwR9itVIgQHNJynFdHfrJPIUyIFMc5ti19MZ8JQQJ99CHACYeBjFXJ3w3AAABACOGQk3i"
-type = string
+  type    = string
 }
 
 variable "aii" {
