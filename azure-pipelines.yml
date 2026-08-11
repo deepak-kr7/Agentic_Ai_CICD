@@ -6,8 +6,8 @@ pool:
 
 variables:
 
-  # Azure DevOps Variable Group
-  - group: terraform-ai-variables
+  # Azure DevOps Variable Group (Uncomment when created in Azure DevOps Library)
+  # - group: terraform-ai-variables
 
   # Terraform
   - name: terraformVersion
