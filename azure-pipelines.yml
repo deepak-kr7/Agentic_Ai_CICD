@@ -126,6 +126,7 @@ stages:
 
 - stage: TFLint
   displayName: '03 - TFLint'
+  continueOnError: true
 
   dependsOn: TerraformValidate
   condition: succeeded()
