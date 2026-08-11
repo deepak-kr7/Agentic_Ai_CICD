@@ -126,7 +126,6 @@ stages:
 
 - stage: TFLint
   displayName: '03 - TFLint'
-  continueOnError: true
 
   dependsOn: TerraformValidate
   condition: succeeded()
@@ -155,6 +154,7 @@ stages:
         tflint --recursive
 
       displayName: 'Run TFLint'
+      continueOnError: true
 
 
 # ==========================================================
