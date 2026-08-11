@@ -42,10 +42,10 @@ variable "storage_accounts" {
 
 variable "ai" {
   default = "B7iEUe5TCSRayYqbwR9itVIgQHNJynFdHfrJPIUyIFMc5ti19MZ8JQQJ99CHACYeBjFXJ3w3AAABACOGQk3i"
-  
+
 }
 
 variable "aii" {
   default = "Dq0VCJnZwMmMq7Gl0b4CO779uq1j7wpqM8QZfXW1491pljiXShRrJQQJ99CHACYeBjFXJ3w3AAABACOGoAbG"
-  
+
 }
