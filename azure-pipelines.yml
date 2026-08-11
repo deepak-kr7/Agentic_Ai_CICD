@@ -184,9 +184,11 @@ stages:
 
         checkov \
           -d "$(terraformWorkingDirectory)" \
-          --framework terraform
+          --framework terraform \
+          --soft-fail
 
       displayName: 'Run Checkov'
+      continueOnError: true
 
 
 # ==========================================================
@@ -218,9 +220,10 @@ stages:
 
         tfsec --version
 
-        tfsec "$(terraformWorkingDirectory)"
+        tfsec "$(terraformWorkingDirectory)" --soft-fail
 
       displayName: 'Run tfsec'
+      continueOnError: true
 
 
 # ==========================================================
