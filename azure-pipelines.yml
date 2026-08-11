@@ -1,0 +1,838 @@
+trigger:
+  - main
+
+pool:
+  name: 2nd_pool
+
+variables:
+
+  # Azure DevOps Variable Group
+  - group: terraform-ai-variables
+
+  # Terraform
+  - name: terraformVersion
+    value: '1.9.8'
+
+  - name: terraformWorkingDirectory
+    value: '$(System.DefaultWorkingDirectory)'
+
+  # Azure DevOps Service Connection
+  - name: azureServiceConnection
+    value: '2nd project service'
+
+  # Terraform Backend
+  - name: backendResourceGroup
+    value: 'cicd_test'
+
+  - name: backendStorageAccount
+    value: 'storagecicd12'
+
+  - name: backendContainer
+    value: 'cicdcontainer'
+
+  - name: backendKey
+    value: 'terraform.tfstate'
+
+
+# ==========================================================
+# 01 - TERRAFORM SETUP
+# ==========================================================
+
+stages:
+
+- stage: TerraformSetup
+  displayName: '01 - Terraform Setup'
+
+  jobs:
+
+  - job: InstallTerraform
+    displayName: 'Install Terraform'
+
+    steps:
+
+    - checkout: self
+
+    - task: TerraformInstaller@1
+      displayName: 'Install Terraform'
+      inputs:
+        terraformVersion: '$(terraformVersion)'
+
+    - script: |
+        terraform version
+      displayName: 'Terraform Version'
+
+
+# ==========================================================
+# 02 - TERRAFORM FORMAT + VALIDATE
+# ==========================================================
+
+- stage: TerraformValidate
+  displayName: '02 - Terraform Format & Validate'
+
+  dependsOn: TerraformSetup
+  condition: succeeded()
+
+  jobs:
+
+  - job: Validate
+    displayName: 'Terraform Validate'
+
+    steps:
+
+    - checkout: self
+
+    - task: TerraformInstaller@1
+      displayName: 'Install Terraform'
+      inputs:
+        terraformVersion: '$(terraformVersion)'
+
+    - script: |
+        terraform fmt -check -recursive
+      displayName: 'Terraform Format Check'
+
+    - task: TerraformTask@5
+      displayName: 'Terraform Init'
+
+      inputs:
+        provider: 'azurerm'
+        command: 'init'
+        workingDirectory: '$(terraformWorkingDirectory)'
+
+        backendServiceArm: '$(azureServiceConnection)'
+
+        backendAzureRmResourceGroupName: '$(backendResourceGroup)'
+
+        backendAzureRmStorageAccountName: '$(backendStorageAccount)'
+
+        backendAzureRmContainerName: '$(backendContainer)'
+
+        backendAzureRmKey: '$(backendKey)'
+
+    - task: TerraformTask@5
+      displayName: 'Terraform Validate'
+
+      inputs:
+        provider: 'azurerm'
+        command: 'validate'
+        workingDirectory: '$(terraformWorkingDirectory)'
+
+
+# ==========================================================
+# 03 - TFLINT
+# ==========================================================
+
+- stage: TFLint
+  displayName: '03 - TFLint'
+
+  dependsOn: TerraformValidate
+  condition: succeeded()
+
+  jobs:
+
+  - job: TFLintScan
+    displayName: 'TFLint Scan'
+
+    steps:
+
+    - checkout: self
+
+    - script: |
+
+        set -e
+
+        curl -s \
+          https://raw.githubusercontent.com/terraform-linters/tflint/master/install_linux.sh \
+          | bash
+
+        tflint --version
+
+        tflint --init
+
+        tflint --recursive
+
+      displayName: 'Run TFLint'
+
+
+# ==========================================================
+# 04 - CHECKOV
+# ==========================================================
+
+- stage: Checkov
+  displayName: '04 - Checkov Security Scan'
+
+  dependsOn: TerraformValidate
+  condition: succeeded()
+
+  jobs:
+
+  - job: CheckovScan
+    displayName: 'Checkov Scan'
+
+    steps:
+
+    - checkout: self
+
+    - script: |
+
+        set -e
+
+        python3 -m pip install --upgrade pip
+
+        python3 -m pip install checkov
+
+        checkov \
+          -d "$(terraformWorkingDirectory)" \
+          --framework terraform
+
+      displayName: 'Run Checkov'
+
+
+# ==========================================================
+# 05 - TFSEC
+# ==========================================================
+
+- stage: Tfsec
+  displayName: '05 - tfsec Security Scan'
+
+  dependsOn: TerraformValidate
+  condition: succeeded()
+
+  jobs:
+
+  - job: TfsecScan
+    displayName: 'tfsec Scan'
+
+    steps:
+
+    - checkout: self
+
+    - script: |
+
+        set -e
+
+        curl -s \
+          https://raw.githubusercontent.com/aquasecurity/tfsec/master/scripts/install_linux.sh \
+          | bash
+
+        tfsec --version
+
+        tfsec "$(terraformWorkingDirectory)"
+
+      displayName: 'Run tfsec'
+
+
+# ==========================================================
+# 06 - GITLEAKS
+# ==========================================================
+
+- stage: Gitleaks
+  displayName: '06 - Gitleaks Secret Scan'
+
+  dependsOn: TerraformValidate
+  condition: succeeded()
+
+  jobs:
+
+  - job: GitleaksScan
+    displayName: 'Gitleaks Scan'
+
+    steps:
+
+    - checkout: self
+      fetchDepth: 0
+
+    - script: |
+
+        set -e
+
+        curl -sSfL \
+          https://raw.githubusercontent.com/gitleaks/gitleaks/master/scripts/install.sh \
+          | bash
+
+        gitleaks version
+
+        gitleaks detect \
+          --source "$(Build.SourcesDirectory)" \
+          --redact \
+          --exit-code 1
+
+      displayName: 'Run Gitleaks'
+
+
+# ==========================================================
+# 07 - TERRAFORM PLAN
+# ==========================================================
+
+- stage: TerraformPlan
+  displayName: '07 - Terraform Plan'
+
+  dependsOn:
+
+    - TerraformValidate
+    - TFLint
+    - Checkov
+    - Tfsec
+    - Gitleaks
+
+  condition: succeeded()
+
+  jobs:
+
+  - job: Plan
+    displayName: 'Terraform Plan'
+
+    steps:
+
+    - checkout: self
+
+    - task: TerraformInstaller@1
+      displayName: 'Install Terraform'
+
+      inputs:
+        terraformVersion: '$(terraformVersion)'
+
+    - task: TerraformTask@5
+      displayName: 'Terraform Init'
+
+      inputs:
+        provider: 'azurerm'
+        command: 'init'
+
+        workingDirectory: '$(terraformWorkingDirectory)'
+
+        backendServiceArm: '$(azureServiceConnection)'
+
+        backendAzureRmResourceGroupName: '$(backendResourceGroup)'
+
+        backendAzureRmStorageAccountName: '$(backendStorageAccount)'
+
+        backendAzureRmContainerName: '$(backendContainer)'
+
+        backendAzureRmKey: '$(backendKey)'
+
+    - task: TerraformTask@5
+      displayName: 'Terraform Plan'
+
+      inputs:
+        provider: 'azurerm'
+        command: 'plan'
+
+        workingDirectory: '$(terraformWorkingDirectory)'
+
+        environmentServiceNameAzureRM: '$(azureServiceConnection)'
+
+        commandOptions: '-out=$(Build.ArtifactStagingDirectory)/tfplan'
+
+    - script: |
+
+        terraform show \
+          -json "$(Build.ArtifactStagingDirectory)/tfplan" \
+          > "$(Build.ArtifactStagingDirectory)/tfplan.json"
+
+      displayName: 'Convert Terraform Plan to JSON'
+
+    - task: PublishPipelineArtifact@1
+      displayName: 'Publish Terraform Plan'
+
+      inputs:
+        targetPath: '$(Build.ArtifactStagingDirectory)'
+        artifact: 'terraform-plan'
+
+
+# ==========================================================
+# 08 - AGENTIC AI
+# ==========================================================
+
+- stage: AgenticAI
+  displayName: '08 - Agentic AI Terraform Security Review'
+
+  dependsOn: TerraformPlan
+  condition: succeeded()
+
+  jobs:
+
+  - job: AIReview
+    displayName: 'Azure OpenAI Security Review'
+
+    steps:
+
+    - checkout: none
+
+    - download: current
+      artifact: terraform-plan
+
+    - task: UsePythonVersion@0
+      displayName: 'Use Python 3.12'
+
+      inputs:
+        versionSpec: '3.12'
+
+    - script: |
+
+        python -m pip install --upgrade pip
+
+        pip install --upgrade openai
+
+      displayName: 'Install OpenAI SDK'
+
+
+    # ======================================================
+    # AZURE OPENAI REVIEW
+    # ======================================================
+
+    - task: PythonScript@0
+
+      displayName: 'Run Agentic AI Security Review'
+
+      env:
+
+        AZURE_OPENAI_ENDPOINT: $(AZURE_OPENAI_ENDPOINT)
+
+        AZURE_OPENAI_API_KEY: $(AZURE_OPENAI_API_KEY)
+
+        AZURE_OPENAI_DEPLOYMENT: $(AZURE_OPENAI_DEPLOYMENT)
+
+      inputs:
+
+        scriptSource: inline
+
+        script: |
+
+          import os
+          import sys
+          import json
+          from openai import AzureOpenAI
+
+
+          # =================================================
+          # VARIABLES
+          # =================================================
+
+          endpoint = os.getenv(
+              "AZURE_OPENAI_ENDPOINT",
+              ""
+          ).strip()
+
+          api_key = os.getenv(
+              "AZURE_OPENAI_API_KEY",
+              ""
+          ).strip()
+
+          deployment = os.getenv(
+              "AZURE_OPENAI_DEPLOYMENT",
+              ""
+          ).strip()
+
+
+          # =================================================
+          # VALIDATION
+          # =================================================
+
+          print("Checking Azure OpenAI configuration...")
+
+
+          if not endpoint:
+
+              print("ERROR: AZURE_OPENAI_ENDPOINT is empty.")
+
+              sys.exit(1)
+
+
+          if not endpoint.startswith("https://"):
+
+              print(
+                  "ERROR: Endpoint must start with https://"
+              )
+
+              sys.exit(1)
+
+
+          if not api_key:
+
+              print(
+                  "ERROR: AZURE_OPENAI_API_KEY is empty."
+              )
+
+              sys.exit(1)
+
+
+          if not deployment:
+
+              print(
+                  "ERROR: AZURE_OPENAI_DEPLOYMENT is empty."
+              )
+
+              sys.exit(1)
+
+
+          print("Endpoint: OK")
+
+          print("API Key: configured")
+
+          print(
+              "Deployment:",
+              deployment
+          )
+
+
+          # =================================================
+          # PLAN
+          # =================================================
+
+          plan_file = os.path.join(
+
+              os.environ["PIPELINE_WORKSPACE"],
+
+              "terraform-plan",
+
+              "tfplan.json"
+
+          )
+
+
+          if not os.path.exists(plan_file):
+
+              print(
+                  "ERROR: tfplan.json not found."
+              )
+
+              sys.exit(1)
+
+
+          with open(plan_file, "r") as f:
+
+              plan = json.load(f)
+
+
+          # =================================================
+          # AZURE OPENAI CLIENT
+          # =================================================
+
+          client = AzureOpenAI(
+
+              api_key=api_key,
+
+              azure_endpoint=endpoint,
+
+              api_version="2024-10-21"
+
+          )
+
+
+          # =================================================
+          # SECURITY PROMPT
+          # =================================================
+
+          system_prompt = """
+
+          You are an Azure Cloud Security Engineer,
+          Terraform Security Expert and DevSecOps reviewer.
+
+          Analyze the Terraform plan.
+
+          Check for:
+
+          - Public Azure resources
+          - Public IP exposure
+          - 0.0.0.0/0 NSG rules
+          - Open network ports
+          - Overly permissive RBAC
+          - Owner permissions
+          - Privilege escalation
+          - Storage security issues
+          - Missing encryption
+          - Missing HTTPS/TLS
+          - Key Vault security issues
+          - Hardcoded secrets
+          - Resource deletion
+          - Destructive changes
+          - Dangerous Azure configurations
+
+          Return EXACTLY:
+
+          RISK_LEVEL: LOW | MEDIUM | HIGH | CRITICAL
+
+          SUMMARY:
+          <summary>
+
+          FINDINGS:
+          - finding 1
+          - finding 2
+
+          RECOMMENDATIONS:
+          - recommendation 1
+          - recommendation 2
+
+          DEPLOYMENT_DECISION: APPROVE | REVIEW_REQUIRED | BLOCK
+
+          """
+
+
+          # =================================================
+          # SEND TO AI
+          # =================================================
+
+          print("")
+          print(
+              "Sending Terraform plan to Azure OpenAI..."
+          )
+
+
+          response = client.chat.completions.create(
+
+              model=deployment,
+
+              messages=[
+
+                  {
+                      "role": "system",
+                      "content": system_prompt
+                  },
+
+                  {
+                      "role": "user",
+                      "content": json.dumps(plan)
+                  }
+
+              ],
+
+              temperature=0
+
+          )
+
+
+          result = (
+              response
+              .choices[0]
+              .message
+              .content
+          )
+
+
+          # =================================================
+          # PRINT REPORT
+          # =================================================
+
+          print("")
+          print(
+              "======================================"
+          )
+
+          print(
+              "    AGENTIC AI SECURITY REPORT"
+          )
+
+          print(
+              "======================================"
+          )
+
+          print(result)
+
+          print(
+              "======================================"
+          )
+
+
+          # =================================================
+          # SAVE REPORT
+          # =================================================
+
+          report_file = os.path.join(
+
+              os.environ[
+                  "BUILD_ARTIFACTSTAGINGDIRECTORY"
+              ],
+
+              "ai-security-report.txt"
+
+          )
+
+
+          with open(report_file, "w") as f:
+
+              f.write(result)
+
+
+          # =================================================
+          # DECISION
+          # =================================================
+
+          decision = "UNKNOWN"
+
+
+          for line in result.splitlines():
+
+              line = line.strip().upper()
+
+              if line.startswith(
+                  "DEPLOYMENT_DECISION:"
+              ):
+
+                  decision = (
+                      line
+                      .split(":", 1)[1]
+                      .strip()
+                  )
+
+                  break
+
+
+          print(
+              f"AI DEPLOYMENT DECISION: {decision}"
+          )
+
+
+          if decision == "BLOCK":
+
+              print(
+                  "AI SECURITY: BLOCKED"
+              )
+
+              sys.exit(1)
+
+
+          if decision == "REVIEW_REQUIRED":
+
+              print(
+                  "AI SECURITY: REVIEW REQUIRED"
+              )
+
+          elif decision == "APPROVE":
+
+              print(
+                  "AI SECURITY: APPROVED"
+              )
+
+          else:
+
+              print(
+                  "ERROR: AI returned invalid decision."
+              )
+
+              sys.exit(1)
+
+
+    # ======================================================
+    # PUBLISH AI REPORT
+    # ======================================================
+
+    - task: PublishPipelineArtifact@1
+
+      displayName: 'Publish AI Security Report'
+
+      inputs:
+
+        targetPath: '$(Build.ArtifactStagingDirectory)/ai-security-report.txt'
+
+        artifact: 'ai-security-report'
+
+
+# ==========================================================
+# 09 - MANUAL APPROVAL
+# ==========================================================
+
+- stage: ManualApproval
+
+  displayName: '09 - Production Approval'
+
+  dependsOn: AgenticAI
+
+  condition: succeeded()
+
+  jobs:
+
+  - deployment: ProductionApproval
+
+    displayName: 'Production Approval'
+
+    environment: 'terraform-production'
+
+    strategy:
+
+      runOnce:
+
+        deploy:
+
+          steps:
+
+          - script: |
+
+              echo "Production approval received."
+
+              echo "Terraform Apply will start."
+
+            displayName: 'Approval Completed'
+
+
+# ==========================================================
+# 10 - TERRAFORM APPLY
+# ==========================================================
+
+- stage: TerraformApply
+
+  displayName: '10 - Terraform Apply'
+
+  dependsOn: ManualApproval
+
+  condition: succeeded()
+
+  jobs:
+
+  - job: Apply
+
+    displayName: 'Terraform Apply'
+
+    steps:
+
+    - checkout: self
+
+    - download: current
+      artifact: terraform-plan
+
+    - task: TerraformInstaller@1
+
+      displayName: 'Install Terraform'
+
+      inputs:
+
+        terraformVersion: '$(terraformVersion)'
+
+
+    - task: TerraformTask@5
+
+      displayName: 'Terraform Init'
+
+      inputs:
+
+        provider: 'azurerm'
+
+        command: 'init'
+
+        workingDirectory: '$(terraformWorkingDirectory)'
+
+        backendServiceArm: '$(azureServiceConnection)'
+
+        backendAzureRmResourceGroupName: '$(backendResourceGroup)'
+
+        backendAzureRmStorageAccountName: '$(backendStorageAccount)'
+
+        backendAzureRmContainerName: '$(backendContainer)'
+
+        backendAzureRmKey: '$(backendKey)'
+
+
+    - task: TerraformTask@5
+
+      displayName: 'Terraform Apply'
+
+      inputs:
+
+        provider: 'azurerm'
+
+        command: 'apply'
+
+        workingDirectory: '$(terraformWorkingDirectory)'
+
+        environmentServiceNameAzureRM: '$(azureServiceConnection)'
+
+        commandOptions: '$(Pipeline.Workspace)/terraform-plan/tfplan'
